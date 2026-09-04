@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 require('dotenv').config();
 
 
@@ -20,14 +20,29 @@ app.get('/health', (req, res) => {
 
 //proxy rules
 const authProxy = createProxyMiddleware({
-    target: process.env.AUTH_SERVICE_URL,
-    changeOrigin: true,
-    pathRewrite: { '^/api/v1/auth': '/auth' },
-    onError: (err, req, res) => {
+  target: `${process.env.AUTH_SERVICE_URL}`,
+  changeOrigin: true,
+  //path rewrited as /auth/url passed to proxy
+  pathRewrite: {
+    '^/': '/auth/',
+  },
+  on: {
+    proxyReq: fixRequestBody,
+    error: (err, req, res) => {
+      console.error('Auth proxy error:', err);
+      if (!res.headersSent) {
         res.status(503).json({ error: 'Auth Service unavailable' });
-    }
+      }
+    },
+  },
 });
 
+// app.use('/api/v1/auth', (req, res, next) => {
+//     console.log(req.body);
+//     next();
+// });
+
+//stripes the mount /api/v1/auth and passes the remaining url to proxy
 app.use('/api/v1/auth', authProxy);
 
 app.listen(PORT, () => {
