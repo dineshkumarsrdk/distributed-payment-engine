@@ -35,7 +35,7 @@ const getAccountById = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Account not found.' });
         }
-        console.log('get account', result);
+        // console.log('get account', result);
         return res.status(200).json({ account: result.rows[0] });
     } catch (error) {
         console.error('Get Account Error:', error);
