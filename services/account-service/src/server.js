@@ -4,7 +4,9 @@ const helmet = require('helmet');
 require('dotenv').config();
 
 const { initDb } = require('./config/db');
+const {connectMongo} = require('./config/mongo')
 const accountRoutes = require('./routes/accountRoutes');
+const auditLogsRoutes =  require('./routes/auditLogsRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 4002;
@@ -18,8 +20,11 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/accounts', accountRoutes);
+// app.use('/auditLogs', (req, res) => {console.log('auditlogs')});
+app.use('/auditLogs', auditLogsRoutes);
 
 app.listen(PORT, async () => {
     console.log(`[Account Service] Running on port ${PORT}`);
     await initDb();
+    await connectMongo();
 });

@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const AuditLog = require('../models/AuditLog');
 
 const transferFunds = async (req, res) => {
     const { fromAccountId, toAccountId, referenceId, amount } = req.body;
@@ -37,6 +38,17 @@ const transferFunds = async (req, res) => {
 
         if (lockResult.rows.length !== 2) {
             await client.query('ROLLBACK');
+            // audit log
+            await AuditLog.create({
+                referenceId,
+                debtorAccountId: fromAccountId,
+                creditorAccountId: toAccountId,
+                amount: transferAmount,
+                status: 'FAILED',
+                failureReason: 'One or both accounts do not exist.',
+                metadata: { ipAddress: req.ip, userAgent: req.get('User-Agent') }
+            });
+
             return res.status(404).json({ error: 'One or both accounts do not exist.' });
         }
 
@@ -47,6 +59,16 @@ const transferFunds = async (req, res) => {
         const currentSourceBalance = parseFloat(sourceAccount.balance);
         if (currentSourceBalance <= transferAmount) {
             await client.query('ROLLBACK');
+            // log insufficient balance failure in MongoDB
+            await AuditLog.create({
+                referenceId,
+                debtorAccountId: fromAccountId,
+                creditorAccountId: toAccountId,
+                amount: transferAmount,
+                status: 'FAILED',
+                failureReason: 'Insufficient balance.',
+                metadata: { ipAddress: req.ip, userAgent: req.get('User-Agent') }
+            });
             return res.status(400).json({ error: 'Insufficient balance.' });
         }
 
@@ -78,6 +100,16 @@ const transferFunds = async (req, res) => {
         // commit Transaction
         await client.query('COMMIT');
 
+        // payment success audit log
+        await AuditLog.create({
+            referenceId,
+            debtorAccountId: fromAccountId,
+            creditorAccountId: toAccountId,
+            amount: transferAmount,
+            status: 'SUCCESS',
+            metadata: { ipAddress: req.ip, userAgent: req.get('User-Agent') }
+        });
+
         return res.status(200).json({
             message: 'Transfer completed successfully',
             referenceId,
@@ -89,6 +121,16 @@ const transferFunds = async (req, res) => {
         // rollback transaction state on error
         await client.query('ROLLBACK');
         console.error('Transfer Transaction Failed:', error);
+        // Write unexpected error audit log
+        await AuditLog.create({
+            referenceId,
+            debtorAccountId: fromAccountId,
+            creditorAccountId: toAccountId,
+            amount: transferAmount,
+            status: 'FAILED',
+            failureReason: error.message || 'Internal database failure.',
+            metadata: { ipAddress: req.ip, userAgent: req.get('User-Agent') }
+        });
         return res.status(500).json({ error: 'Transaction failed and was safely rolled back.' });
     } finally {
         // release client connection back to pool
