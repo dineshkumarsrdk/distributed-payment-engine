@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const { initDb } = require('./config/db');
 const {connectMongo} = require('./config/mongo')
+const {connectRedis} = require('./config/redis');
 const accountRoutes = require('./routes/accountRoutes');
 const auditLogsRoutes =  require('./routes/auditLogsRoutes');
 
@@ -27,4 +28,5 @@ app.listen(PORT, async () => {
     console.log(`[Account Service] Running on port ${PORT}`);
     await initDb();
     await connectMongo();
+    await connectRedis();
 });

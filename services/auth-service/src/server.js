@@ -4,7 +4,7 @@ const helmet = require('helmet');
 require('dotenv').config();
 
 const { initDb } = require('./config/db');
-const { redisClient } = require('./config/redis');
+const { connectRedis } = require('./config/redis');
 const authRoutes = require('./routes/authRoutes'); 
 
 const app = express();
@@ -28,5 +28,5 @@ app.use('/auth', authRoutes);
 app.listen(PORT, async () => {
   console.log(`[Auth Service] Running on port ${PORT}`);
   await initDb();
-  await redisClient.connect();
+  await connectRedis();
 });

@@ -37,6 +37,23 @@ const authProxy = createProxyMiddleware({
   },
 });
 
+const accountProxy = createProxyMiddleware({
+  target: `${process.env.ACCOUNT_SERVICE_URL}`,
+  changeOrigin: true,
+  pathRewrite: {
+    '^/': '/accounts/',
+  },
+  on: {
+    proxyReq: fixRequestBody,
+    error: (err, req, res) => {
+      console.error('Account proxy error:', err);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'Account Service unavailable' });
+      }
+    },
+  },
+});
+
 // app.use('/api/v1/auth', (req, res, next) => {
 //     console.log(req.body);
 //     next();
@@ -44,6 +61,7 @@ const authProxy = createProxyMiddleware({
 
 //stripes the mount /api/v1/auth and passes the remaining url to proxy
 app.use('/api/v1/auth', authProxy);
+app.use('/api/v1/accounts', accountProxy);
 
 app.listen(PORT, () => {
   console.log(`[API Gateway] Running on port ${PORT}`);
