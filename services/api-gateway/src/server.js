@@ -54,6 +54,23 @@ const accountProxy = createProxyMiddleware({
   },
 });
 
+const transactionProxy = createProxyMiddleware({
+  target: `${process.env.TRANSACTION_SERVICE_URL}`,
+  changeOrigin: true,
+  pathRewrite: {
+    '^/': '/transactions/',
+  },
+  on: {
+    proxyReq: fixRequestBody,
+    error: (err, req, res) => {
+      console.error('Transaction proxy error:', err);
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'Transaction Service unavailable' });
+      }
+    },
+  },
+});
+
 // app.use('/api/v1/auth', (req, res, next) => {
 //     console.log(req.body);
 //     next();
@@ -62,6 +79,7 @@ const accountProxy = createProxyMiddleware({
 //stripes the mount /api/v1/auth and passes the remaining url to proxy
 app.use('/api/v1/auth', authProxy);
 app.use('/api/v1/accounts', accountProxy);
+app.use('/api/v1/transactions', transactionProxy)
 
 app.listen(PORT, () => {
   console.log(`[API Gateway] Running on port ${PORT}`);
