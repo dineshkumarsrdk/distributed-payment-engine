@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 
 const { connectRabbitMQ } = require('./config/rabbitmq');
+const { connectRedis } = require('./config/redis');
+const { startPaymentProcessor } = require('./workers/paymentProcessor');
 const transactionRoutes = require('./routes/transactionRoutes');
 
 const app = express();
@@ -21,4 +23,6 @@ app.use('/transactions', transactionRoutes);
 app.listen(PORT, async () => {
     console.log(`[Transaction Service] Running on port ${PORT}`);
     await connectRabbitMQ();
+    await connectRedis();
+    await startPaymentProcessor();
 })

@@ -23,8 +23,8 @@ const initiateTransfer = async (req, res) => {
     const eventPayload = {
         transactionId,
         referenceId,
-        debtorAccount: parseInt(fromAccountId),
-        creditorAccount: parseInt(toAccountId),
+        fromAccountId: parseInt(fromAccountId),
+        toAccountId: parseInt(toAccountId),
         amount: transferAmount,
         status: 'PENDING',
         timestamp: new Date().toISOString()
