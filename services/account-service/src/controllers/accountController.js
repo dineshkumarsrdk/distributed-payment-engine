@@ -43,4 +43,57 @@ const getAccountById = async (req, res) => {
     }
 };
 
-module.exports = { createAccount, getAccountById };
+const compensateTransfer = async (req, res) => {
+    const { originalReferenceId, reason } = req.body;
+
+    if (!originalReferenceId) {
+        return res.status(400).json({ error: 'originalReferenceId is required.' });
+    }
+
+    const client = await db.getClient();
+
+    try {
+        await client.query('BEGIN');
+
+        const originalEntries = await client.query(
+            `SELECT account_id, entry_type, amount FROM ledger_entries WHERE reference_id = $1`,
+            [originalReferenceId]
+        );
+
+        const debitEntry = originalEntries.rows.find(e => e.entry_type === 'DEB');
+        const creditEntry = originalEntries.rows.find(e => e.entry_type === 'CRE');
+        const reversalAmount = Math.abs(parseFloat(debitEntry.amount));
+        const compensationRef = `REV-${originalReferenceId}`;
+
+        const accountIds = [debitEntry.account_id, creditEntry.account_id].sort((a, b) => a - b);
+        await client.query('SELECT id FROM accounts WHERE id IN ($1, $2) ORDER BY id FOR UPDATE', accountIds);
+
+        await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [reversalAmount, debitEntry.account_id]);
+        await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [reversalAmount, creditEntry.account_id]);
+
+        await client.query(
+            'INSERT INTO ledger_entries (account_id, amount, entry_type, reference_id) VALUES ($1, $2, $3, $4)',
+            [debitEntry.account_id, reversalAmount, 'CRE', compensationRef]
+        );
+        await client.query(
+            'INSERT INTO ledger_entries (account_id, amount, entry_type, reference_id) VALUES ($1, $2, $3, $4)',
+            [creditEntry.account_id, -reversalAmount, 'DEB', compensationRef]
+        );
+
+        await client.query('COMMIT');
+
+        return res.status(200).json({
+            message: 'Compensation successful. Funds reverted.',
+            compensationRef,
+            reason
+        });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Compensation Failed:', error);
+        return res.status(500).json({ error: 'Failed to compensate transaction.' });
+    } finally {
+        client.release();
+    }
+}
+
+module.exports = { createAccount, getAccountById, compensateTransfer };

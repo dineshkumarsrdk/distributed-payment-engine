@@ -12,6 +12,15 @@ const generateSystemToken = async () => {
   return token;
 };
 
+// Simulated downstream External Clearing House
+const mockExternalClearing = async (transactionId) => {
+  // Simulate a 50% failure rate to test our Saga compensation
+  // const isSuccess = Math.random() > 0.5;
+  const isSuccess = false;
+  if (!isSuccess) throw new Error('External clearing network timeout or rejection.');
+  // return true;
+};
+
 const startPaymentProcessor = async () => {
   const channel = getChannel();
   const queue = process.env.QUEUE_NAME;
@@ -51,16 +60,33 @@ const startPaymentProcessor = async () => {
           headers: { Authorization: `Bearer ${systemToken}` }
         });
 
-        // 4. Mark as Processed in Redis (Lock expires in 24 hours to save memory)
-        await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
+        try {
+          await mockExternalClearing(payload.transactionId);
+          await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
+          channel.ack(msg);
+          console.log(`[Worker] Transaction ${payload.transactionId} fully settled.`);
+        } catch (clearingError) {
+          // SAGA FAILURE COMPENSATING ACTION
+          console.warn(`[Worker] Downstream failure for ${payload.transactionId}. Initiating Saga Compensation...`);
+          
+          await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/compensate`, {
+            originalReferenceId: payload.referenceId,
+            reason: clearingError.message
+          }, 
+          {
+            headers: { Authorization: `Bearer ${systemToken}` }
+          });
 
-        // 5. Acknowledge message to RabbitMQ
-        channel.ack(msg);
+          await redisClient.set(idempotencyKey, 'COMPENSATED', { EX: 86400 });
+          channel.ack(msg); // Message processed, state safely reverted
+          console.log(`[Worker] Saga Compensation complete for ${payload.transactionId}. Funds safely reverted.`);
+        }
+        
         console.log(`[Worker] Successfully processed Transaction: ${payload.transactionId}`);
 
       } catch (error) {
         console.error(`[Worker] Failed Transaction ${payload.transactionId}:`, error?.response?.data || error.message);
-        
+
         // Reject message and set requeue=false to route it to the Dead Letter Queue (DLQ)
         channel.reject(msg, false);
       }

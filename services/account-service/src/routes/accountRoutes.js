@@ -1,5 +1,5 @@
 const express = require('express');
-const { createAccount, getAccountById } = require('../controllers/accountController');
+const { createAccount, getAccountById, compensateTransfer } = require('../controllers/accountController');
 const { transferFunds } = require('../controllers/fundTransferController');
 const { verifyToken } = require('../middleware/authMiddleware');
 
@@ -10,5 +10,6 @@ router.use(verifyToken);
 router.post('/', createAccount);
 router.get('/:id', getAccountById);
 router.post('/transfer', transferFunds);
+router.post('/compensate', compensateTransfer);
 
 module.exports = router;
