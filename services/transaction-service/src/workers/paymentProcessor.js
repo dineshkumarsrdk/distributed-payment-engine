@@ -2,6 +2,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { getChannel } = require('../config/rabbitmq');
 const { redisClient } = require('../config/redis');
+const { acquireLock } = require('../utils/distributedLock');
 require('dotenv').config();
 
 // Generate a valid system-level JWT to bypass account-service auth
@@ -45,6 +46,24 @@ const startPaymentProcessor = async () => {
           return;
         }
 
+        const accountIds = [payload.fromAccountId, payload.toAccountId].sort((a, b) => a - b);
+
+        const sourceLockToken = await acquireLock(`account:${accountIds[0]}`, 10000);
+        const targetLockToken = await acquireLock(`account:${accountIds[1]}`, 10000);
+
+        if(!sourceLockToken || !targetLockToken) {
+          console.warn(`[Worker] Could not acquire distributed locks for accounts [${accountIds.join(', ')}]. Requeueing message.`);
+          // Release any lock that was partially acquired
+          if (sourceLockToken) await releaseLock(`account:${accountIds[0]}`, sourceLockToken);
+          if (targetLockToken) await releaseLock(`account:${accountIds[1]}`, targetLockToken);
+
+          // Requeue message after short delay to allow the active worker to finish
+          setTimeout(() => channel.nack(msg, false, true), 500);
+          return;
+        }
+
+        console.log(`[Worker] Locks acquired for accounts [${accountIds.join(', ')}]. Processing TXN: ${payload.transactionId}`);
+
         // 2. Generate System Token for Inter-Service Auth
         const systemToken = await generateSystemToken();
 
@@ -68,20 +87,20 @@ const startPaymentProcessor = async () => {
         } catch (clearingError) {
           // SAGA FAILURE COMPENSATING ACTION
           console.warn(`[Worker] Downstream failure for ${payload.transactionId}. Initiating Saga Compensation...`);
-          
+
           await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/compensate`, {
             originalReferenceId: payload.referenceId,
             reason: clearingError.message
-          }, 
-          {
-            headers: { Authorization: `Bearer ${systemToken}` }
-          });
+          },
+            {
+              headers: { Authorization: `Bearer ${systemToken}` }
+            });
 
           await redisClient.set(idempotencyKey, 'COMPENSATED', { EX: 86400 });
           channel.ack(msg); // Message processed, state safely reverted
           console.log(`[Worker] Saga Compensation complete for ${payload.transactionId}. Funds safely reverted.`);
         }
-        
+
         console.log(`[Worker] Successfully processed Transaction: ${payload.transactionId}`);
 
       } catch (error) {
