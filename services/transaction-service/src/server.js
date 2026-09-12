@@ -1,6 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const path = require('path');
+require('dotenv').config({
+  path: path.resolve(__dirname, '../.env')
+});
 
 const { connectRabbitMQ } = require('./config/rabbitmq');
 const { connectRedis } = require('./config/redis');

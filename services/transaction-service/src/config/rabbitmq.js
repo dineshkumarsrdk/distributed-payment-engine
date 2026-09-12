@@ -31,7 +31,20 @@ const connectRabbitMQ = async () => {
         );
         // Bind Primary Queue to Main Exchange
         await channel.bindQueue(process.env.QUEUE_NAME, process.env.EXCHANGE_NAME, process.env.ROUTING_KEY);
-        console.log('[Transaction Service RabbitMQ] Exchanges & Queues asserted.');
+
+        // Assert retry exchange and queue
+        // Messages in retry_queue expire after TTL and dead-letter BACK to the primary exchange
+        await channel.assertExchange(process.env.RTX_NAME, 'direct', { durable: true });
+        await channel.assertQueue(process.env.RTQ_NAME, {
+            durable: true,
+            arguments: {
+                'x-dead-letter-exchange': process.env.EXCHANGE_NAME, // Routes back to main exchange on expiry
+                'x-dead-letter-routing-key': process.env.ROUTING_KEY
+            }
+        });
+        await channel.bindQueue(process.env.RTQ_NAME, process.env.RTX_NAME, process.env.RTQ_ROUTING_KEY);
+
+        console.log('[Transaction Service RabbitMQ] Exchanges & Queues (Main, Retry, DLQ) asserted.');
     } catch (error) {
         console.error('[Transaction Service RabbitMQ] Connection failure:', error);
         process.exit(1);
@@ -40,9 +53,9 @@ const connectRabbitMQ = async () => {
 
 const getChannel = () => {
     if (!channel) {
-    throw new Error('RabbitMQ channel has not been initialized.');
-  }
-  return channel;
+        throw new Error('RabbitMQ channel has not been initialized.');
+    }
+    return channel;
 }
 
 module.exports = { connectRabbitMQ, getChannel };

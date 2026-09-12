@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const redisClient = require('../config/redis');
+const { redisClient } = require('../config/redis');
 
 /**
  * Acquires a distributed lock for a specific resource key.

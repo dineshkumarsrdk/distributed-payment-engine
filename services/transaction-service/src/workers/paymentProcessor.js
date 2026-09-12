@@ -2,7 +2,8 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { getChannel } = require('../config/rabbitmq');
 const { redisClient } = require('../config/redis');
-const { acquireLock } = require('../utils/distributedLock');
+const { acquireLock, releaseLock } = require('../utils/distributedLock');
+const { handleProcessingFailure } = require('../utils/retryHandler');
 require('dotenv').config();
 
 // Generate a valid system-level JWT to bypass account-service auth
@@ -14,13 +15,13 @@ const generateSystemToken = async () => {
 };
 
 // Simulated downstream External Clearing House
-const mockExternalClearing = async (transactionId) => {
-  // Simulate a 50% failure rate to test our Saga compensation
-  // const isSuccess = Math.random() > 0.5;
-  const isSuccess = false;
-  if (!isSuccess) throw new Error('External clearing network timeout or rejection.');
-  // return true;
-};
+// const mockExternalClearing = async (transactionId) => {
+// Simulate a 50% failure rate to test our Saga compensation
+// const isSuccess = Math.random() > 0.5;
+// const isSuccess = false;
+// if (!isSuccess) throw new Error('External clearing network timeout or rejection.');
+//   return true;
+// };
 
 const startPaymentProcessor = async () => {
   const channel = getChannel();
@@ -34,7 +35,8 @@ const startPaymentProcessor = async () => {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString());
       console.log(`[Worker] Received Transaction: ${payload.transactionId}`);
-
+      let sourceLockToken = null;
+      let targetLockToken = null;
       try {
         // 1. Idempotency Check (Prevent Double Execution)
         const idempotencyKey = `txn:processed:${payload.transactionId}`;
@@ -48,10 +50,10 @@ const startPaymentProcessor = async () => {
 
         const accountIds = [payload.fromAccountId, payload.toAccountId].sort((a, b) => a - b);
 
-        const sourceLockToken = await acquireLock(`account:${accountIds[0]}`, 10000);
-        const targetLockToken = await acquireLock(`account:${accountIds[1]}`, 10000);
+        sourceLockToken = await acquireLock(`account:${accountIds[0]}`, 10000);
+        targetLockToken = await acquireLock(`account:${accountIds[1]}`, 10000);
 
-        if(!sourceLockToken || !targetLockToken) {
+        if (!sourceLockToken || !targetLockToken) {
           console.warn(`[Worker] Could not acquire distributed locks for accounts [${accountIds.join(', ')}]. Requeueing message.`);
           // Release any lock that was partially acquired
           if (sourceLockToken) await releaseLock(`account:${accountIds[0]}`, sourceLockToken);
@@ -79,35 +81,44 @@ const startPaymentProcessor = async () => {
           headers: { Authorization: `Bearer ${systemToken}` }
         });
 
-        try {
-          await mockExternalClearing(payload.transactionId);
-          await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
-          channel.ack(msg);
-          console.log(`[Worker] Transaction ${payload.transactionId} fully settled.`);
-        } catch (clearingError) {
-          // SAGA FAILURE COMPENSATING ACTION
-          console.warn(`[Worker] Downstream failure for ${payload.transactionId}. Initiating Saga Compensation...`);
+        // try {
+        //   await mockExternalClearing(payload.transactionId);
+        //   await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
+        //   channel.ack(msg);
+        //   console.log(`[Worker] Transaction ${payload.transactionId} fully settled.`);
+        // } catch (clearingError) {
+        //   // SAGA FAILURE COMPENSATING ACTION
+        //   console.warn(`[Worker] Downstream failure for ${payload.transactionId}. Initiating Saga Compensation...`);
 
-          await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/compensate`, {
-            originalReferenceId: payload.referenceId,
-            reason: clearingError.message
-          },
-            {
-              headers: { Authorization: `Bearer ${systemToken}` }
-            });
+        //   await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/compensate`,
+        //     {
+        //       originalReferenceId: payload.referenceId,
+        //       reason: clearingError.message
+        //     },
+        //     {
+        //       headers: { Authorization: `Bearer ${systemToken}` }
+        //     }
+        //   );
 
-          await redisClient.set(idempotencyKey, 'COMPENSATED', { EX: 86400 });
-          channel.ack(msg); // Message processed, state safely reverted
-          console.log(`[Worker] Saga Compensation complete for ${payload.transactionId}. Funds safely reverted.`);
-        }
+        //   await redisClient.set(idempotencyKey, 'COMPENSATED', { EX: 86400 });
+        //   channel.ack(msg); // Message processed, state safely reverted
+        //   console.log(`[Worker] Saga Compensation complete for ${payload.transactionId}. Funds safely reverted.`);
+        // }
 
+        await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
+        channel.ack(msg);
         console.log(`[Worker] Successfully processed Transaction: ${payload.transactionId}`);
 
       } catch (error) {
         console.error(`[Worker] Failed Transaction ${payload.transactionId}:`, error?.response?.data || error.message);
-
+        // Delegate failure handling to Exponential Backoff Engine
+        await handleProcessingFailure(msg, error);
         // Reject message and set requeue=false to route it to the Dead Letter Queue (DLQ)
-        channel.reject(msg, false);
+        // channel.reject(msg, false);
+      } finally {
+        const accountIds = [payload.fromAccountId, payload.toAccountId].sort((a, b) => a - b);
+        if (sourceLockToken) await releaseLock(`account:${accountIds[0]}`, sourceLockToken);
+        if (targetLockToken) await releaseLock(`account:${accountIds[1]}`, targetLockToken);
       }
     }
   });
