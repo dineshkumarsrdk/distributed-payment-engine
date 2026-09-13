@@ -7,6 +7,7 @@ const { redisClient } = require('../config/redis');
 const { acquireLock, releaseLock } = require('../utils/distributedLock');
 const { handleProcessingFailure } = require('../utils/retryHandler');
 const { accountTransferBreaker } = require('../utils/circuitBreaker');
+const logger = require('../utils/logger');
 
 // Generate a valid system-level JWT to bypass account-service auth
 const generateSystemToken = async () => {
@@ -36,7 +37,8 @@ const startPaymentProcessor = async () => {
   channel.consume(queue, async (msg) => {
     if (msg !== null) {
       const payload = JSON.parse(msg.content.toString());
-      console.log(`[Worker] Received Transaction: ${payload.transactionId}`);
+      const correlationId = msg.properties.headers?.['x-correlation-id']
+      logger.info(correlationId, `[Worker] Received Transaction: ${payload.transactionId}`);
       let sourceLockToken = null;
       let targetLockToken = null;
       try {
@@ -45,7 +47,7 @@ const startPaymentProcessor = async () => {
         const isProcessed = await redisClient.get(idempotencyKey);
 
         if (isProcessed) {
-          console.warn(`[Worker] Transaction ${payload.transactionId} already processed. Skipping.`);
+          logger.warn(correlationId, `[Worker] Transaction ${payload.transactionId} already processed. Skipping.`);
           channel.ack(msg); // Acknowledge and remove duplicate from queue
           return;
         }
@@ -56,7 +58,7 @@ const startPaymentProcessor = async () => {
         targetLockToken = await acquireLock(`account:${accountIds[1]}`, 10000);
 
         if (!sourceLockToken || !targetLockToken) {
-          console.warn(`[Worker] Could not acquire distributed locks for accounts [${accountIds.join(', ')}]. Requeueing message.`);
+          logger.warn(`[Worker] Could not acquire distributed locks for accounts [${accountIds.join(', ')}]. Requeueing message.`);
           // Release any lock that was partially acquired
           if (sourceLockToken) await releaseLock(`account:${accountIds[0]}`, sourceLockToken);
           if (targetLockToken) await releaseLock(`account:${accountIds[1]}`, targetLockToken);
@@ -66,7 +68,7 @@ const startPaymentProcessor = async () => {
           return;
         }
 
-        console.log(`[Worker] Locks acquired for accounts [${accountIds.join(', ')}]. Processing TXN: ${payload.transactionId}`);
+        logger.info(correlationId, `[Worker] Locks acquired for accounts [${accountIds.join(', ')}]. Processing TXN: ${payload.transactionId}`);
 
         // 2. Generate System Token for Inter-Service Auth
         const systemToken = await generateSystemToken();
@@ -86,7 +88,7 @@ const startPaymentProcessor = async () => {
         await accountTransferBreaker.fire({
           url: `${process.env.ACCOUNT_SERVICE_URL}/accounts/transfer`,
           payload: transferPayload,
-          headers: { Authorization: `Bearer ${systemToken}` }
+          headers: { Authorization: `Bearer ${systemToken}`, 'x-correlation-id': correlationId }
         });
 
         // try {
@@ -115,10 +117,10 @@ const startPaymentProcessor = async () => {
 
         await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
         channel.ack(msg);
-        console.log(`[Worker] Successfully processed Transaction: ${payload.transactionId}`);
+        logger.info(correlationId, `[Worker] Successfully processed Transaction: ${payload.transactionId}`);
 
       } catch (error) {
-        console.error(`[Worker] Failed Transaction ${payload.transactionId}:`, error?.response?.data || error.message);
+        logger.error(correlationId, `[Worker] Failed Transaction ${payload.transactionId}:`, error?.response?.data || error.message);
         // Delegate failure handling to Exponential Backoff Engine
         await handleProcessingFailure(msg, error);
         // Reject message and set requeue=false to route it to the Dead Letter Queue (DLQ)

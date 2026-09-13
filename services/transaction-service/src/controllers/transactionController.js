@@ -1,7 +1,10 @@
 const { randomUUID } = require('crypto');
 const { publishEvent } = require('../utils/producer');
+const logger = require('../utils/logger');
 
 const initiateTransfer = async (req, res) => {
+    const correlationId = req.headers['x-correlation-id'];
+    console.log('------>req.correlationId', correlationId);
     const { fromAccountId, toAccountId, amount, referenceId } = req.body;
 
     if (!fromAccountId || !toAccountId || !amount || !referenceId) {
@@ -32,12 +35,13 @@ const initiateTransfer = async (req, res) => {
 
     try {
         const routingKey = process.env.ROUTING_KEY;
-        await publishEvent(routingKey, eventPayload);
-
+        await publishEvent(routingKey, eventPayload, correlationId);
+        logger.info(correlationId, `Accepted and queued transaction ${transactionId}`);
         return res.status(202).json({
             message: 'Transaction request accepted and queued for processing.',
             transactionId,
             referenceId,
+            correlationId,
             status: 'PENDING',
         });
     } catch (error) {

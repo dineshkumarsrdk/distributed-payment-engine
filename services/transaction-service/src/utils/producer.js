@@ -1,4 +1,5 @@
 const { getChannel } = require('../config/rabbitmq');
+const logger = require('./logger');
 require('dotenv').config();
 
 /**
@@ -7,7 +8,7 @@ require('dotenv').config();
  * @param {object} payload - Event payload data
  */
 
-const publishEvent = async (routingKey, payload) => {
+const publishEvent = async (routingKey, payload, correlationId) => {
     try {
         const channel = getChannel();
         const exchange = process.env.EXCHANGE_NAME;
@@ -17,17 +18,20 @@ const publishEvent = async (routingKey, payload) => {
         const published = channel.publish(exchange, routingKey, messageBuffer, {
             persistent: true,
             contentType: 'application/json',
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            headers: {
+                'x-correlation-id': correlationId, // Attach trace header to RabbitMQ envelope
+            }
         });
 
         if (published) {
-            console.log(`[Producer] Published event [${routingKey}] successfully:`, payload.transactionId);
+            logger.info(correlationId, `[Producer] Published event [${routingKey}] successfully: ${payload.transactionId}`);
         } else {
-            console.warn(`[Producer] Message buffer full while publishing event [${routingKey}]`);
+            logger.warn(correlationId, `[Producer] Message buffer full while publishing event [${routingKey}]`);
         }
         return published;
     } catch (error) {
-        console.error(`[Producer Error] Failed to publish event [${routingKey}]:`, error);
+        logger.error(`[Producer Error] Failed to publish event [${routingKey}]:`, error);
         throw error;
     }
 };

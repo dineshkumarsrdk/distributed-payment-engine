@@ -7,6 +7,7 @@ require('dotenv').config();
 
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const { connectRedis, redisClient } = require('./config/redis');
+const { correlationIdMiddleware } = require('./middleware/correlationId');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,12 +16,13 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
-
-// redis connection has to be made before redis store initiation
+// Inject Correlation ID early in the middleware pipeline
+app.use(correlationIdMiddleware);
+// // redis connection has to be made before redis store initiation
 (async () => {
   await connectRedis();
 })(); 
-// rate limiter: allowing max 100 requests per 15-minute window per IP
+// // rate limiter: allowing max 100 requests per 15-minute window per IP
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000,
   limit: 100,
@@ -30,6 +32,8 @@ const apiLimiter = rateLimit({
   message: {error: 'Too many requests from this IP, please try again after 15 minutes.'}
 });
 
+// API rate limiter middleware
+app.use(apiLimiter);
 //health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', service: 'api-gateway', timestamp: new Date() });
@@ -92,8 +96,6 @@ const transactionProxy = createProxyMiddleware({
 //     console.log(req.body);
 //     next();
 // });
-
-app.use(apiLimiter);
 
 //stripes the mount /api/v1/auth and passes the remaining url to proxy
 app.use('/api/v1/auth', authProxy);
