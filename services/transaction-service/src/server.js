@@ -10,6 +10,7 @@ const { connectRabbitMQ } = require('./config/rabbitmq');
 const { connectRedis } = require('./config/redis');
 const { startPaymentProcessor } = require('./workers/paymentProcessor');
 const transactionRoutes = require('./routes/transactionRoutes');
+const { getMetrics } = require('./utils/metrics');
 
 const app = express();
 const PORT = process.env.PORT || 4003;
@@ -17,6 +18,8 @@ const PORT = process.env.PORT || 4003;
 app.use(cors());
 app.use(helmet());
 app.use(express.json());
+
+app.get('/metrics', getMetrics);
 
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'UP', service: 'transaction-service', timestamp: new Date() });

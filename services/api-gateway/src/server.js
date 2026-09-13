@@ -8,6 +8,7 @@ require('dotenv').config();
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const { connectRedis, redisClient } = require('./config/redis');
 const { correlationIdMiddleware } = require('./middleware/correlationId');
+const {metricsMiddleware, getMetrics} = require('./middleware/metrics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,8 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+
+app.use(metricsMiddleware);
 // Inject Correlation ID early in the middleware pipeline
 app.use(correlationIdMiddleware);
 // // redis connection has to be made before redis store initiation
@@ -34,6 +37,8 @@ const apiLimiter = rateLimit({
 
 // API rate limiter middleware
 app.use(apiLimiter);
+// Expose Prometheus scraping endpoint
+app.get('/metrics', getMetrics);
 //health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', service: 'api-gateway', timestamp: new Date() });

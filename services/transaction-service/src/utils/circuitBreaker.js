@@ -1,6 +1,8 @@
 const CircuitBreaker = require('opossum');
 const axios = require('axios');
 
+const { circuitBreakerState } = require('./metrics');
+
 const makeAccountTransferCall = async ({url, payload, headers}) => {
     return await axios.post(url, payload, { headers, timeout: 3000 });
 };
@@ -15,14 +17,17 @@ const options = {
 const accountTransferBreaker = new CircuitBreaker(makeAccountTransferCall, options);
 
 accountTransferBreaker.on('open', () => {
+  circuitBreakerState.labels('account-service').set(1);
   console.warn('[Circuit Breaker] OPEN: Downstream Account Service failing. Fast-failing requests.');
 });
 
 accountTransferBreaker.on('halfOpen', () => {
+  circuitBreakerState.labels('account-service').set(0.5);
   console.log('[Circuit Breaker] HALF-OPEN: Testing downstream health with next request...');
 });
 
 accountTransferBreaker.on('close', () => {
+  circuitBreakerState.labels('account-service').set(0);
   console.log('[Circuit Breaker] CLOSED: Downstream Account Service restored to healthy state.');
 });
 

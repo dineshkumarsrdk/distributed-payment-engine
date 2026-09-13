@@ -4,7 +4,6 @@ const logger = require('../utils/logger');
 
 const initiateTransfer = async (req, res) => {
     const correlationId = req.headers['x-correlation-id'];
-    console.log('------>req.correlationId', correlationId);
     const { fromAccountId, toAccountId, amount, referenceId } = req.body;
 
     if (!fromAccountId || !toAccountId || !amount || !referenceId) {

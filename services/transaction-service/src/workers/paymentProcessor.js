@@ -8,6 +8,7 @@ const { acquireLock, releaseLock } = require('../utils/distributedLock');
 const { handleProcessingFailure } = require('../utils/retryHandler');
 const { accountTransferBreaker } = require('../utils/circuitBreaker');
 const logger = require('../utils/logger');
+const { circuitBreakerState, processedMessages } = require('../utils/metrics');
 
 // Generate a valid system-level JWT to bypass account-service auth
 const generateSystemToken = async () => {
@@ -118,8 +119,9 @@ const startPaymentProcessor = async () => {
         await redisClient.set(idempotencyKey, 'SUCCESS', { EX: 86400 });
         channel.ack(msg);
         logger.info(correlationId, `[Worker] Successfully processed Transaction: ${payload.transactionId}`);
-
+        processedMessages.labels('success').inc();
       } catch (error) {
+        processedMessages.labels('error').inc();
         logger.error(correlationId, `[Worker] Failed Transaction ${payload.transactionId}:`, error?.response?.data || error.message);
         // Delegate failure handling to Exponential Backoff Engine
         await handleProcessingFailure(msg, error);
