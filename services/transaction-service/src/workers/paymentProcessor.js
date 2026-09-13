@@ -1,10 +1,12 @@
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
+require('dotenv').config();
+
 const { getChannel } = require('../config/rabbitmq');
 const { redisClient } = require('../config/redis');
 const { acquireLock, releaseLock } = require('../utils/distributedLock');
 const { handleProcessingFailure } = require('../utils/retryHandler');
-require('dotenv').config();
+const { accountTransferBreaker } = require('../utils/circuitBreaker');
 
 // Generate a valid system-level JWT to bypass account-service auth
 const generateSystemToken = async () => {
@@ -77,7 +79,13 @@ const startPaymentProcessor = async () => {
           referenceId: payload.referenceId
         };
 
-        await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/transfer`, transferPayload, {
+        // await axios.post(`${process.env.ACCOUNT_SERVICE_URL}/accounts/transfer`, transferPayload, {
+        //   headers: { Authorization: `Bearer ${systemToken}` }
+        // });
+        // replacing axios call with circuit breaker
+        await accountTransferBreaker.fire({
+          url: `${process.env.ACCOUNT_SERVICE_URL}/accounts/transfer`,
+          payload: transferPayload,
           headers: { Authorization: `Bearer ${systemToken}` }
         });
 
