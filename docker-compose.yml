@@ -1,72 +1,144 @@
 version: '3.8'
 
 services:
-  # 1. Transactional Store (ACID for Account Balances)
+  # ==========================================
+  # INFRASTRUCTURE SERVICES
+  # ==========================================
   postgres:
     image: postgres:16-alpine
-    container_name: payment-postgres
-    restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin_secret
+      POSTGRES_DB: bank_db
     ports:
-      - "${POSTGRES_PORT}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - "55432:5432"
     networks:
-      - payment-network
+      - backend-network
+    volumes:
+      - pg-data:/var/lib/postgresql/data
 
-  # 2. Audit Trail Store (Immutable Event Logs & Payload History)
   mongodb:
     image: mongo:8.0-noble
-    container_name: payment-mongo
-    restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_ROOT_USERNAME: mongo_admin
+      MONGO_INITDB_ROOT_PASSWORD: mongo_secret
     ports:
-      - "${MONGO_PORT}:27017"
-    volumes:
-      - mongo_data:/data/db
+      - "27017:27017"
     networks:
-      - payment-network
+      - backend-network
+    volumes:
+      - mongo-data:/data/db
 
-  # 3. Cache & Distributed Lock (Auth Tokens & Concurrency Locks)
   redis:
     image: redis:7-alpine
-    container_name: payment-redis
-    restart: always
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: redis-server --requirepass redis_secret
     ports:
-      - "${REDIS_PORT}:6379"
-    volumes:
-      - redis_data:/data
+      - "6379:6379"
     networks:
-      - payment-network
+      - backend-network
 
-  # 4. Message Broker (Async Events, Saga Pattern & Retries)
   rabbitmq:
     image: rabbitmq:3-management-alpine
-    container_name: payment-rabbitmq
-    restart: always
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_USER: mq_admin
+      RABBITMQ_DEFAULT_PASS: mq_secret
     ports:
-      - "${RABBITMQ_PORT}:5672"       # AMQP Protocol Port
-      - "${RABBITMQ_MGMT_PORT}:15672" # Web Dashboard Port
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
     networks:
-      - payment-network
+      - backend-network
+
+  # ==========================================
+  # APPLICATION MICROSERVICES
+  # ==========================================
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - AUTH_SERVICE_URL=http://auth-service:4001
+      - ACCOUNT_SERVICE_URL=http://account-service:4002
+      - TRANSACTION_SERVICE_URL=http://transaction-service:4003
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_secret
+    depends_on:
+      - redis
+    networks:
+      - backend-network
+
+  auth-service:
+    build: ./services/auth-service
+    environment:
+      - PORT=4001
+      - DB_HOST=postgres
+      - DB_USER=admin
+      - DB_PASSWORD=admin_secret
+      - DB_NAME=bank_db
+      - JWT_SECRET=super_secret_jwt_key
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_secret
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - backend-network
+
+  account-service:
+    build: ./services/account-service
+    environment:
+      - PORT=4002
+      - DB_HOST=postgres
+      - DB_USER=admin
+      - DB_PASSWORD=admin_secret
+      - DB_NAME=bank_db
+      - JWT_SECRET=super_secret_jwt_key
+      - MONGO_URI=mongodb://mongo_admin:mongo_secret@mongodb:27017/ledger_audit?authSource=admin
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_secret
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+    networks:
+      - backend-network
+
+  transaction-service:
+    build: ./services/transaction-service
+    environment:
+      - PORT=4003
+      - ACCOUNT_SERVICE_URL=http://account-service:4002
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=mq_admin
+      - RABBITMQ_PASS=mq_secret
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=redis_secret
+      - EXCHANGE_NAME=transaction_exchange
+      - QUEUE_NAME=payment_queue
+      - ROUTING_KEY=payment.process
+      - DLX_NAME=transaction_dlx
+      - DLQ_NAME=payment_dlq
+      - DLQ_ROUTING_KEY=payment.dead_letter
+      - RTX_NAME=transaction_retry_exchange
+      - RTQ_NAME=payment_retry_queue
+      - RTQ_ROUTING_KEY=payment.retry
+      - JWT_SECRET=super_secret_jwt_key
+    depends_on:
+      - rabbitmq
+      - redis
+      - account-service
+    networks:
+      - backend-network
 
 networks:
-  payment-network:
+  backend-network:
     driver: bridge
 
 volumes:
-  postgres_data:
-  mongo_data:
-  redis_data:
-  rabbitmq_data:
+  pg-data:
+  mongo-data:
