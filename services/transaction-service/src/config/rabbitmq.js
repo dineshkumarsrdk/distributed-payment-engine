@@ -1,4 +1,5 @@
 const amqp = require('amqplib');
+const logger = require('../utils/logger');
 require('dotenv').config();
 
 let channel = null;
@@ -9,7 +10,7 @@ const connectRabbitMQ = async () => {
         const amqpUrl = `amqp://${process.env.RABBITMQ_USER}:${process.env.RABBITMQ_PASS}@${process.env.RABBITMQ_HOST}:${process.env.RABBITMQ_PORT}`
         connection = await amqp.connect(amqpUrl);
         channel = await connection.createChannel();
-        console.log('[Transaction Service RabbitMQ] Connected successfully.');
+        logger.info('system', '[Transaction Service RabbitMQ] Connected successfully.');
 
         // Assert Dead Letter Exchange (DLX) & Dead Letter Queue (DLQ) for unprocessable messages
         await channel.assertExchange(process.env.DLX_NAME, 'direct', { durable: true });
@@ -44,9 +45,9 @@ const connectRabbitMQ = async () => {
         });
         await channel.bindQueue(process.env.RTQ_NAME, process.env.RTX_NAME, process.env.RTQ_ROUTING_KEY);
 
-        console.log('[Transaction Service RabbitMQ] Exchanges & Queues (Main, Retry, DLQ) asserted.');
+        logger.info('system', '[Transaction Service RabbitMQ] Exchanges & Queues (Main, Retry, DLQ) asserted.');
     } catch (error) {
-        console.error('[Transaction Service RabbitMQ] Connection failure:', error);
+        logger.error('system', '[Transaction Service RabbitMQ] Connection failure', error);
         process.exit(1);
     }
 }

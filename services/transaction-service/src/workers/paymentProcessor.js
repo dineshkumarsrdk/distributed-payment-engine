@@ -8,7 +8,7 @@ const { acquireLock, releaseLock } = require('../utils/distributedLock');
 const { handleProcessingFailure } = require('../utils/retryHandler');
 const { accountTransferBreaker } = require('../utils/circuitBreaker');
 const logger = require('../utils/logger');
-const { circuitBreakerState, processedMessages } = require('../utils/metrics');
+const { processedMessages } = require('../utils/metrics');
 
 // Generate a valid system-level JWT to bypass account-service auth
 const generateSystemToken = async () => {
