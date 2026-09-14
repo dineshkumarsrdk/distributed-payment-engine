@@ -20,10 +20,10 @@ pipeline {
             steps {
                 echo 'Installing dependencies and running tests...'
                 // Example of running tests in one of the services
-                sh '''
-                    cd services/transaction-service
-                    npm ci --only=production
-                    # npm test (Uncomment when test scripts are added to package.json)
+                bat '''
+                    cd services\\transaction-service
+                    npm ci --omit=dev
+                    REM npm test (Uncomment when test scripts are added to package.json)
                 '''
             }
         }
@@ -32,7 +32,7 @@ pipeline {
             steps {
                 echo "Building microservice images with tag: ${IMAGE_TAG}..."
                 // Build all services defined in docker-compose.yml
-                sh 'docker-compose build'
+                bat 'docker-compose build'
             }
         }
 
@@ -40,7 +40,7 @@ pipeline {
             steps {
                 echo 'Running vulnerability scans on built images...'
                 // Placeholder for Trivy or npm audit steps
-                sh 'npm audit --production || true'
+                bat 'npm audit --omit=dev || exit /b 0'
             }
         }
 
@@ -48,8 +48,8 @@ pipeline {
             steps {
                 echo 'Deploying the cluster via Docker Compose...'
                 // Tears down the old containers and spins up the newly built ones
-                sh 'docker-compose down'
-                sh 'docker-compose up -d'
+                bat 'docker-compose down'
+                bat 'docker-compose up -d'
             }
         }
     }
@@ -64,7 +64,7 @@ pipeline {
         }
         always {
             // Clean up dangling images to save disk space on the Jenkins node
-            sh 'docker image prune -f'
+            bat 'docker image prune -f'
         }
     }
 }
