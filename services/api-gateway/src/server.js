@@ -3,9 +3,9 @@ const cors = require('cors');
 const helmet = require('helmet');
 const { RedisStore } = require('rate-limit-redis');
 const { rateLimit } = require('express-rate-limit');
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 require('dotenv').config();
 
-const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const { connectRedis, redisClient } = require('./config/redis');
 const { correlationIdMiddleware } = require('./middleware/correlationId');
 const {metricsMiddleware, getMetrics} = require('./middleware/metrics');
@@ -21,13 +21,13 @@ app.use(express.json());
 app.use(metricsMiddleware);
 // Inject Correlation ID early in the middleware pipeline
 app.use(correlationIdMiddleware);
-// // redis connection has to be made before redis store initiation
+// // redis connection has to be made before redis store initiation for rate limit
 (async () => {
   await connectRedis();
 })(); 
-// // rate limiter: allowing max 100 requests per 15-minute window per IP
+// rate limiter: allowing max 100 requests per 15-minute window per IP
 const apiLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
+  windowMs: 15 * 60 * 1000,
   limit: 100,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
