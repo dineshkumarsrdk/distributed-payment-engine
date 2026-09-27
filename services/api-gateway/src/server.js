@@ -105,7 +105,7 @@ const transactionProxy = createProxyMiddleware({
 //stripes the mount /api/v1/auth and passes the remaining url to proxy
 app.use('/api/v1/auth', authProxy);
 app.use('/api/v1/accounts', accountProxy);
-app.use('/api/v1/transactions', transactionProxy)
+app.use('/api/v1/transactions', transactionProxy);
 
 app.listen(PORT, async () => {
   console.log(`[API Gateway] Running on port ${PORT}`);
