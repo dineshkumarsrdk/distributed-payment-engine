@@ -38,7 +38,7 @@ flowchart TD
 
     subgraph Ledger & Persistence Layer
         PaymentWorker -->|2. Acquire Redlock| Redis
-        PaymentWorker -->|3. Lock Rows & Execute Balance Transfer| AccountServ[Account Service :4002]
+        PaymentWorker -->|3. Lock Rows & Execute Balance Transfer| AccountService[Account Service :4002]
         AccountServ -->|Pessimistic Lock & Ledger Update| Postgres[(PostgreSQL Primary DB :5432)]
         AuthServ --> Postgres
     end
